@@ -5,6 +5,20 @@ from storage import init_db
 from extractor import extract_all
 from agent import agent_reply
 
+EMPTY_RESPONSE = {
+    "scam_detected": False,
+    "confidence": 0.0,
+    "engagement_metrics": {
+        "turns": 0,
+        "duration_seconds": 0
+    },
+    "extracted_intelligence": {
+        "upi_ids": [],
+        "bank_accounts": [],
+        "phishing_urls": []
+    }
+}
+
 API_KEY = os.getenv("API_KEY", "my-secret-key")
 DB_PATH = "honeypot.db"
 
@@ -51,10 +65,8 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     history = payload.get("conversationHistory", [])
 
     if not session_id or not message:
-        return {
-            "status": "success",
-            "reply": "Honeypot active"
-        }
+        return EMPTY_RESPONSE
+
 
     sender = message.get("sender", "")
     text = message.get("text", "")
@@ -100,6 +112,16 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     conn.close()
 
     return {
-        "status": "success",
-        "reply": reply_text
+    "scam_detected": scam_detected,
+    "confidence": 0.85 if scam_detected else 0.1,
+    "engagement_metrics": {
+        "turns": stage,
+        "duration_seconds": 10
+    },
+    "extracted_intelligence": {
+        "upi_ids": intelligence["upiIds"],
+        "bank_accounts": intelligence["bankAccounts"],
+        "phishing_urls": intelligence["phishingLinks"]
     }
+}
+
