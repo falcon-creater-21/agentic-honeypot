@@ -11,27 +11,31 @@ DB_PATH = "honeypot.db"
 app = FastAPI()
 init_db()
 
-# ---------------- HEALTH CHECK ---------------- #
+# ---------------- HEALTH ---------------- #
 @app.get("/")
 def health():
     return {"status": "ok"}
 
 # ---------------- HONEYPOT ---------------- #
-@app.post("/honeypot")
+@app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
-    # AUTH
+    # 🔑 AUTH
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # 🔑 GUVI FIX: SAFE BODY PARSE
+    # 🔑 GUVI HEAD CHECK
+    if request.method == "HEAD":
+        return
+
+    # 🔑 SAFE BODY PARSE
     try:
         body = await request.body()
         payload = json.loads(body) if body else {}
     except Exception:
         payload = {}
 
-    # 🔑 GUVI TESTER RESPONSE
+    # 🔑 GUVI EMPTY BODY RESPONSE
     if not payload:
         return {
             "status": "success",
