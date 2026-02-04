@@ -1,9 +1,9 @@
 import sqlite3
 
-DB = "honeypot.db"
+DB_PATH = "honeypot.db"
 
 def init_db():
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
     cur.execute("""
@@ -22,7 +22,7 @@ def init_db():
         session_id TEXT,
         sender TEXT,
         text TEXT,
-        timestamp REAL
+        timestamp INTEGER
     )
     """)
 

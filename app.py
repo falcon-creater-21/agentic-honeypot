@@ -17,25 +17,28 @@ def health():
     return {"status": "ok"}
 
 # ---------------- HONEYPOT ---------------- #
-@app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
+@app.api_route("/honeypot", methods=["GET", "POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
-    # 🔑 AUTH
+    # AUTH
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # 🔑 GUVI HEAD CHECK
-    if request.method == "HEAD":
-        return
+    # GUVI GET / HEAD / OPTIONS
+    if request.method in ["GET", "HEAD", "OPTIONS"]:
+        return {
+            "status": "success",
+            "reply": "Honeypot active"
+        }
 
-    # 🔑 SAFE BODY PARSE
+    # SAFE BODY PARSE
     try:
         body = await request.body()
         payload = json.loads(body) if body else {}
     except Exception:
         payload = {}
 
-    # 🔑 GUVI EMPTY BODY RESPONSE
+    # EMPTY BODY (GUVI POST)
     if not payload:
         return {
             "status": "success",
