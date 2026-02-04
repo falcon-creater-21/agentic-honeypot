@@ -1,15 +1,12 @@
 from fastapi import FastAPI, Header, HTTPException, Request
-import sqlite3, time, os, json
-from storage import init_db
+import os, json
 from extractor import extract_all
 from agent import agent_reply
 from callback import send_final_result
 
 API_KEY = os.getenv("API_KEY", "my-secret-key")
-DB_PATH = "honeypot.db"
 
 app = FastAPI()
-init_db()
 
 @app.get("/")
 def health():
@@ -21,7 +18,7 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Tester sends HEAD/GET
+    # GUVI tester requests
     if request.method != "POST":
         return {
             "status": "success",
@@ -36,19 +33,18 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
             "reply": "Honeypot active"
         }
 
-    session_id = payload.get("sessionId")
+    if not payload:
+        return {
+            "status": "success",
+            "reply": "Honeypot active"
+        }
+
     message = payload.get("message", {})
     history = payload.get("conversationHistory", [])
 
-    if not session_id or not message:
-        return {
-            "status": "success",
-            "reply": "Can you explain that?"
-        }
-
     text = message.get("text", "")
-    intelligence = extract_all(text)
 
+    intelligence = extract_all(text)
     scam_detected = len(intelligence["suspiciousKeywords"]) >= 2
 
     reply = "Can you explain that?"
@@ -57,9 +53,9 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         agent = agent_reply(1, text, history, intelligence)
         reply = agent["reply"]
 
-        # 🔥 OPTIONAL FINAL CALLBACK (won’t affect tester)
+        # FINAL CALLBACK (silent, tester ignores this)
         send_final_result({
-            "sessionId": session_id,
+            "sessionId": payload.get("sessionId"),
             "scamDetected": True,
             "totalMessagesExchanged": len(history) + 1,
             "extractedIntelligence": intelligence,
