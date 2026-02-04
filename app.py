@@ -166,3 +166,17 @@ def honeypot(payload: Optional[dict] = None, x_api_key: str = Header(None)):
         "status": "success",
         "reply": agent_reply_text
     }
+@app.get("/")
+def root():
+    return {
+        "status": "success",
+        "message": "Agentic Honeypot API is running"
+    }
+
+
+@app.get("/honeypot")
+def honeypot_health():
+    return {
+        "status": "success",
+        "reply": "Hello, how can I help you?"
+    }
