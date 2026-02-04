@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Header, HTTPException
+from typing import Optional
 import sqlite3
 import time
 import os
@@ -11,8 +12,8 @@ from callback import send_final_result
 # ---------------- CONFIG ---------------- #
 
 API_KEY = os.getenv("API_KEY", "my-secret-key")
-DEBUG_MODE = True
 DB_PATH = "honeypot.db"
+DEBUG_MODE = True
 
 # ---------------- APP INIT ---------------- #
 
@@ -22,11 +23,18 @@ init_db()
 # ---------------- ENDPOINT ---------------- #
 
 @app.post("/honeypot")
-def honeypot(payload: dict, x_api_key: str = Header(None)):
+def honeypot(payload: Optional[dict] = None, x_api_key: str = Header(None)):
 
     # ---------- AUTH ----------
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # ---------- GUVI TESTER (NO BODY) ----------
+    if payload is None:
+        return {
+            "status": "success",
+            "reply": "Hello, how can I help you?"
+        }
 
     # ---------- SAFE PARSE ----------
     session_id = payload.get("sessionId")
@@ -40,11 +48,11 @@ def honeypot(payload: dict, x_api_key: str = Header(None)):
     text = message.get("text", "")
     timestamp = message.get("timestamp", int(time.time() * 1000))
 
-    # ---------- DB CONNECT ----------
+    # ---------- DB ----------
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # ---------- SESSION INIT ----------
+    # ---------- SESSION ----------
     cur.execute(
         "SELECT stage, scam_detected FROM sessions WHERE session_id=?",
         (session_id,)
@@ -89,9 +97,7 @@ def honeypot(payload: dict, x_api_key: str = Header(None)):
     ]
 
     risk_score = len(suspicious)
-    risk_score += sum(
-        1 for t in high_risk_terms if t in full_text.lower()
-    )
+    risk_score += sum(1 for t in high_risk_terms if t in full_text.lower())
 
     scam_detected = risk_score >= 2
 
@@ -147,7 +153,7 @@ def honeypot(payload: dict, x_api_key: str = Header(None)):
 
         send_final_result(final_payload)
 
-        # prevent duplicate callbacks
+        # prevent duplicate callback
         cur.execute(
             "UPDATE sessions SET stage=99 WHERE session_id=?",
             (session_id,)
