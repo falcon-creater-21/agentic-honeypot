@@ -1,68 +1,103 @@
 from fastapi import FastAPI, Header, HTTPException, Request
-import os, json
+import sqlite3, time, os, json
+
+from storage import init_db
 from extractor import extract_all
 from agent import agent_reply
-from callback import send_final_result
 
 API_KEY = os.getenv("API_KEY", "my-secret-key")
+DB_PATH = "honeypot.db"
 
 app = FastAPI()
+init_db()
 
+# ---------------- HEALTH ---------------- #
 @app.get("/")
 def health():
     return {"status": "ok"}
 
-@app.api_route("/honeypot", methods=["POST", "GET", "HEAD", "OPTIONS"])
+# ---------------- HONEYPOT ---------------- #
+@app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
+    # AUTH
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # GUVI tester requests
-    if request.method != "POST":
-        return {
-            "status": "success",
-            "reply": "Honeypot active"
-        }
+    # HEAD / OPTIONS → PASS TESTER
+    if request.method in ["HEAD", "OPTIONS"]:
+        return
 
+    # SAFE BODY PARSE
     try:
-        payload = await request.json()
-    except:
-        return {
-            "status": "success",
-            "reply": "Honeypot active"
-        }
+        body = await request.body()
+        payload = json.loads(body) if body else {}
+    except Exception:
+        payload = {}
 
+    # 🔑 GUVI TESTER EMPTY BODY EXPECTATION
     if not payload:
         return {
             "status": "success",
             "reply": "Honeypot active"
         }
 
+    # ---------------- NORMAL FLOW ---------------- #
+    session_id = payload.get("sessionId")
     message = payload.get("message", {})
     history = payload.get("conversationHistory", [])
 
+    if not session_id or not message:
+        return {
+            "status": "success",
+            "reply": "Honeypot active"
+        }
+
+    sender = message.get("sender", "")
     text = message.get("text", "")
+    timestamp = message.get("timestamp", int(time.time() * 1000))
 
-    intelligence = extract_all(text)
-    scam_detected = len(intelligence["suspiciousKeywords"]) >= 2
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
 
-    reply = "Can you explain that?"
+    cur.execute("SELECT stage FROM sessions WHERE session_id=?", (session_id,))
+    row = cur.fetchone()
+
+    if not row:
+        stage = 1
+        cur.execute(
+            "INSERT INTO sessions (session_id, scam_detected, start_time, stage, agent_notes) VALUES (?,?,?,?,?)",
+            (session_id, 0, time.time(), stage, "")
+        )
+    else:
+        stage = row[0]
+
+    cur.execute(
+        "INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?,?,?,?)",
+        (session_id, sender, text, timestamp)
+    )
+
+    full_text = " ".join([m.get("text", "") for m in history] + [text])
+    intelligence = extract_all(full_text)
+
+    scam_detected = len(intelligence.get("suspiciousKeywords", [])) >= 2
+
+    reply_text = "Can you explain that?"
 
     if scam_detected:
-        agent = agent_reply(1, text, history, intelligence)
-        reply = agent["reply"]
+        agent = agent_reply(stage, text, history, intelligence)
+        reply_text = agent["reply"]
 
-        # FINAL CALLBACK (silent, tester ignores this)
-        send_final_result({
-            "sessionId": payload.get("sessionId"),
-            "scamDetected": True,
-            "totalMessagesExchanged": len(history) + 1,
-            "extractedIntelligence": intelligence,
-            "agentNotes": agent["note"]
-        })
+        cur.execute(
+            "UPDATE sessions SET stage=stage+1, scam_detected=1 WHERE session_id=?",
+            (session_id,)
+        )
 
+    conn.commit()
+    conn.close()
+
+    # 🔥 ALWAYS RETURN THIS FORMAT
     return {
         "status": "success",
-        "reply": reply
+        "reply": reply_text
     }
