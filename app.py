@@ -12,22 +12,30 @@ DB_PATH = "honeypot.db"
 app = FastAPI()
 init_db()
 
+# ---------------- HEALTH ---------------- #
 @app.get("/")
 def health():
     return {"status": "success", "reply": "Honeypot active"}
 
+# ---------------- HONEYPOT ---------------- #
 @app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
+    # 🔐 AUTH (always JSON)
     if x_api_key != API_KEY:
         return {"status": "error", "reply": "Unauthorized"}
 
+    # ✅ GUVI preflight
     if request.method in ["HEAD", "OPTIONS"]:
         return {"status": "success", "reply": "Honeypot active"}
 
+    # ✅ Safe JSON parse
     try:
         payload = await request.json()
     except Exception:
+        return {"status": "success", "reply": "Honeypot active"}
+
+    if not isinstance(payload, dict):
         return {"status": "success", "reply": "Honeypot active"}
 
     session_id = payload.get("sessionId")
@@ -41,11 +49,13 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     if not text:
         return {"status": "success", "reply": "Honeypot active"}
 
+    # ---------------- DB ---------------- #
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
+    # Fetch session
     cur.execute(
-        "SELECT stage, agent_notes FROM sessions WHERE session_id=?",
+        "SELECT stage, agent_notes, phase FROM sessions WHERE session_id=?",
         (session_id,)
     )
     row = cur.fetchone()
@@ -53,15 +63,26 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     if not row:
         stage = 1
         last_reply = None
+        phase = "CONFUSED"
+
         cur.execute(
-            "INSERT INTO sessions VALUES (?,?,?,?,?)",
-            (session_id, 0, time.time(), stage, "")
+            """
+            INSERT INTO sessions
+            (session_id, scam_detected, start_time, stage, agent_notes, phase)
+            VALUES (?,?,?,?,?,?)
+            """,
+            (session_id, 0, time.time(), stage, "", phase)
         )
     else:
-        stage, last_reply = row
+        stage, last_reply, phase = row
 
+    # Store incoming message
     cur.execute(
-        "INSERT INTO messages VALUES (NULL,?,?,?,?)",
+        """
+        INSERT INTO messages
+        (session_id, sender, text, timestamp)
+        VALUES (?,?,?,?)
+        """,
         (
             session_id,
             message.get("sender", ""),
@@ -70,13 +91,17 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         )
     )
 
-    full_text = " ".join(h.get("text", "") for h in history if isinstance(h, dict)) + " " + text
+    # ---------------- INTELLIGENCE ---------------- #
+    history_texts = [
+        h.get("text", "") for h in history if isinstance(h, dict)
+    ]
+    full_text = " ".join(history_texts + [text])
     intelligence = extract_all(full_text)
 
     scam_detected = len(intelligence["suspiciousKeywords"]) >= 2
-
     reply_text = "Can you explain that?"
 
+    # ---------------- AGENT ---------------- #
     if scam_detected:
         agent = agent_reply(
             stage=stage,
@@ -85,16 +110,24 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
             intelligence=intelligence,
             last_agent_reply=last_reply
         )
+
         reply_text = agent["reply"]
 
         cur.execute(
-            "UPDATE sessions SET stage=stage+1, scam_detected=1, agent_notes=? WHERE session_id=?",
+            """
+            UPDATE sessions
+            SET stage = stage + 1,
+                scam_detected = 1,
+                agent_notes = ?
+            WHERE session_id = ?
+            """,
             (reply_text, session_id)
         )
 
     conn.commit()
     conn.close()
 
+    # ---------------- FINAL CALLBACK ---------------- #
     if scam_detected and stage >= 3:
         try:
             send_final_result({
@@ -105,8 +138,9 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
                 "agentNotes": "HF-driven adaptive engagement"
             })
         except Exception:
-            pass
+            pass  # NEVER break honeypot flow
 
+    # ✅ EXACT FORMAT GUVI EXPECTS
     return {
         "status": "success",
         "reply": reply_text
