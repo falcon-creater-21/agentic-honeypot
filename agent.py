@@ -1,3 +1,4 @@
+from llm import generate_llm_reply
 def agent_reply(stage: int, last_message: str, history: list, intelligence: dict) -> dict:
     """
     Human-like naive victim agent.
@@ -111,7 +112,11 @@ def agent_reply(stage: int, last_message: str, history: list, intelligence: dict
             "note": "Delay tactic"
         }
 
+   # ---------- LLM FALLBACK ----------
+
+    llm_reply = generate_llm_reply(history, last_message)
+
     return {
-        "reply": "I’m going to handle this directly with my bank.",
-        "note": "Safe exit"
+        "reply": llm_reply,
+        "note": "LLM fallback engagement"
     }
