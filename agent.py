@@ -1,44 +1,18 @@
 def agent_reply(stage: int, last_message: str, history: list, intelligence: dict) -> dict:
     """
     Human-like naive victim agent.
-    Escalates compliance gradually and extracts intelligence.
+    Optimized for GUVI evaluation scoring.
     """
 
     msg = last_message.lower()
 
-    # ---------- HIGH PRIORITY EXTRACTION ----------
+    # ---------- EMOTIONAL TRUST FIRST ----------
 
-    if "account" in msg and not intelligence["bankAccounts"]:
+    if "blocked" in msg or "suspended" in msg:
         return {
-            "reply": "I’m scared. Which account number do you need? Please tell me exactly.",
-            "note": "Prompting bank account"
+            "reply": "Why is my account getting blocked suddenly? I didn’t do anything wrong.",
+            "note": "Fear escalation"
         }
-
-    if "ifsc" in msg and not intelligence["bankAccounts"]:
-        return {
-            "reply": "I’m not sure where to find IFSC. Can you explain?",
-            "note": "IFSC clarification"
-        }
-
-    if "upi" in msg and not intelligence["upiIds"]:
-        return {
-            "reply": "I tried sending my UPI earlier but it failed. Can you check again?",
-            "note": "UPI extraction"
-        }
-
-    if any(k in msg for k in ["link", "verify", "click"]) and not intelligence["phishingLinks"]:
-        return {
-            "reply": "I clicked the link but nothing happened. Can you resend it?",
-            "note": "Phishing link extraction"
-        }
-
-    if "otp" in msg:
-        return {
-            "reply": "I got an OTP message. Should I share it with you?",
-            "note": "OTP baiting"
-        }
-
-    # ---------- PSYCHOLOGICAL ENGAGEMENT ----------
 
     if "urgent" in msg or "immediately" in msg:
         return {
@@ -46,10 +20,36 @@ def agent_reply(stage: int, last_message: str, history: list, intelligence: dict
             "note": "Urgency reinforcement"
         }
 
-    if "blocked" in msg or "suspended" in msg:
+    # ---------- INTELLIGENCE EXTRACTION ----------
+
+    if "account" in msg and not intelligence["bankAccounts"]:
         return {
-            "reply": "Why is my account getting blocked suddenly? I didn’t do anything wrong.",
-            "note": "Fear escalation"
+            "reply": "Which account number do you need exactly? Please guide me carefully.",
+            "note": "Bank account extraction"
+        }
+
+    if "ifsc" in msg and not intelligence["bankAccounts"]:
+        return {
+            "reply": "I’m not sure where to find the IFSC. Can you explain?",
+            "note": "IFSC clarification"
+        }
+
+    if "upi" in msg and not intelligence["upiIds"]:
+        return {
+            "reply": "I tried sharing my UPI earlier but it didn’t work. Can you resend yours?",
+            "note": "UPI extraction"
+        }
+
+    if any(k in msg for k in ["link", "verify", "click"]) and not intelligence["phishingLinks"]:
+        return {
+            "reply": "The link isn’t opening on my phone. Can you send it again?",
+            "note": "Phishing link extraction"
+        }
+
+    if "otp" in msg:
+        return {
+            "reply": "I just received an OTP. Should I share it with you?",
+            "note": "OTP baiting"
         }
 
     # ---------- STAGE-BASED FLOW ----------
@@ -62,25 +62,25 @@ def agent_reply(stage: int, last_message: str, history: list, intelligence: dict
 
     if stage == 2:
         return {
-            "reply": "Okay, I want to fix this. Please guide me step by step.",
+            "reply": "Okay, I want to fix this. Please tell me what to do next.",
             "note": "Compliance initiation"
         }
 
     if stage == 3:
         return {
-            "reply": "I’m trying to follow your instructions but I’m not very technical.",
+            "reply": "I’m trying to follow your steps, but I’m not very technical.",
             "note": "Delayed compliance"
         }
 
-    if stage == 4:
+    if stage >= 4:
         return {
             "reply": "I really don’t want to lose my money. Please help me finish this.",
             "note": "Emotional compliance"
         }
 
-    # ---------- FINAL FALLBACK ----------
+    # ---------- FALLBACK ----------
 
     return {
-        "reply": "Please explain once more. I don’t want to make any mistake.",
+        "reply": "Please explain again. I don’t want to make a mistake.",
         "note": "Extended engagement"
     }

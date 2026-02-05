@@ -12,24 +12,19 @@ DB_PATH = "honeypot.db"
 app = FastAPI()
 init_db()
 
-# ---------------- HEALTH ---------------- #
 @app.get("/")
 def health():
     return {"status": "ok"}
 
-# ---------------- HONEYPOT ---------------- #
 @app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
-    # 🔐 AUTH
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # ✅ GUVI preflight
-    if request.method in ["GET", "HEAD", "OPTIONS"]:
+    if request.method in ["HEAD", "OPTIONS"]:
         return {"status": "success"}
 
-    # ✅ SAFE JSON PARSE
     try:
         payload = await request.json()
     except Exception:
@@ -45,55 +40,45 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     if not session_id or not isinstance(message, dict):
         return {"status": "success", "reply": "Honeypot active"}
 
-    sender = message.get("sender", "")
     text = message.get("text", "")
+    sender = message.get("sender", "")
     timestamp = message.get("timestamp", int(time.time() * 1000))
 
     if not text:
         return {"status": "success", "reply": "Honeypot active"}
 
-    if not isinstance(history, list):
-        history = []
-
-    # ---------------- DB ---------------- #
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("SELECT stage FROM sessions WHERE session_id=?", (session_id,))
+    cur.execute("SELECT stage, agent_notes FROM sessions WHERE session_id=?", (session_id,))
     row = cur.fetchone()
 
     if not row:
         stage = 1
+        callback_sent = ""
         cur.execute(
-            """
-            INSERT INTO sessions
-            (session_id, scam_detected, start_time, stage, agent_notes)
-            VALUES (?,?,?,?,?)
-            """,
+            "INSERT INTO sessions VALUES (?,?,?,?,?)",
             (session_id, 0, time.time(), stage, "")
         )
     else:
-        stage = row[0]
+        stage, callback_sent = row
 
     cur.execute(
-        """
-        INSERT INTO messages (session_id, sender, text, timestamp)
-        VALUES (?,?,?,?)
-        """,
+        "INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?,?,?,?)",
         (session_id, sender, text, timestamp)
     )
 
-    # ---------------- INTELLIGENCE ---------------- #
-    history_texts = [
-        h.get("text", "")
-        for h in history
-        if isinstance(h, dict)
-    ]
-
+    history_texts = [h.get("text", "") for h in history if isinstance(h, dict)]
     full_text = " ".join(history_texts + [text])
+
     intelligence = extract_all(full_text)
 
-    scam_detected = len(intelligence["suspiciousKeywords"]) >= 2
+    scam_detected = (
+        len(intelligence["suspiciousKeywords"]) >= 2
+        or intelligence["bankAccounts"]
+        or intelligence["upiIds"]
+        or intelligence["phishingLinks"]
+    )
 
     reply_text = "Can you explain that?"
 
@@ -102,35 +87,57 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         reply_text = agent["reply"]
 
         cur.execute(
-            "UPDATE sessions SET stage = stage + 1, scam_detected = 1 WHERE session_id=?",
+            "UPDATE sessions SET stage=stage+1, scam_detected=1 WHERE session_id=?",
             (session_id,)
         )
 
     conn.commit()
-    conn.close()
 
-    # ---------------- FINAL CALLBACK (MANDATORY) ---------------- #
-    if scam_detected and stage >= 3:
+    # ---------- FINAL CALLBACK (ONCE ONLY) ----------
+    should_callback = (
+        scam_detected
+        and stage >= 4
+        and callback_sent == ""
+        and (
+            intelligence["bankAccounts"]
+            or intelligence["upiIds"]
+            or intelligence["phishingLinks"]
+        )
+    )
+
+    if should_callback:
+        total_messages = len(history) + 1
+
+        agent_notes = []
+        if intelligence["bankAccounts"]:
+            agent_notes.append("bank account harvesting")
+        if intelligence["upiIds"]:
+            agent_notes.append("UPI payment redirection")
+        if intelligence["phishingLinks"]:
+            agent_notes.append("phishing link delivery")
+        if intelligence["suspiciousKeywords"]:
+            agent_notes.append("urgency and fear tactics")
+
         final_payload = {
             "sessionId": session_id,
             "scamDetected": True,
-            "totalMessagesExchanged": stage,
-            "extractedIntelligence": {
-                "bankAccounts": intelligence["bankAccounts"],
-                "upiIds": intelligence["upiIds"],
-                "phishingLinks": intelligence["phishingLinks"],
-                "phoneNumbers": intelligence["phoneNumbers"],
-                "suspiciousKeywords": intelligence["suspiciousKeywords"]
-            },
-            "agentNotes": "Scammer used urgency and payment redirection tactics"
+            "totalMessagesExchanged": total_messages,
+            "extractedIntelligence": intelligence,
+            "agentNotes": ", ".join(agent_notes)
         }
 
         try:
             send_final_result(final_payload)
+            cur.execute(
+                "UPDATE sessions SET agent_notes=? WHERE session_id=?",
+                ("callback_sent", session_id)
+            )
+            conn.commit()
         except Exception:
-            pass  # never break honeypot flow
+            pass
 
-    # ✅ EXACT FORMAT GUVI EXPECTS
+    conn.close()
+
     return {
         "status": "success",
         "reply": reply_text
