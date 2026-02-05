@@ -1,5 +1,14 @@
 from llm import hf_generate
 from intent import detect_intent
+import random
+
+EXIT_REPLIES = [
+    "I’m not comfortable continuing this conversation.",
+    "I’ve decided to contact my bank directly.",
+    "I won’t share sensitive information here.",
+    "I’m ending this conversation now.",
+    "Please stop contacting me. I’ll handle this with my bank."
+]
 
 def agent_reply(
     stage: int,
@@ -9,20 +18,26 @@ def agent_reply(
     last_agent_reply: str | None,
     phase: str
 ) -> dict:
-    """
-    HF-powered, loop-safe, state-aware honeypot agent.
-    """
 
     intent = detect_intent(last_message)
 
-    # TERMINAL EXIT STATE
+    history_text = "\n".join(
+        f"{h.get('sender','')}: {h.get('text','')}"
+        for h in history if isinstance(h, dict)
+    )
+
+    # 🟥 SAFE DISENGAGEMENT PHASE (NO HARD LOOP)
     if phase == "EXITED":
+        reply = random.choice(
+            [r for r in EXIT_REPLIES if r != last_agent_reply]
+            or EXIT_REPLIES
+        )
         return {
-            "reply": "I will handle this directly with my bank.",
+            "reply": reply,
             "phase": "EXITED"
         }
 
-    # PHASE TRANSITION
+    # 🔄 PHASE TRANSITIONS
     if intent == "OTP":
         next_phase = "RESISTING"
     elif phase == "CONFUSED":
@@ -30,22 +45,12 @@ def agent_reply(
     else:
         next_phase = phase
 
-    history_text = "\n".join(
-        f"{h.get('sender','')}: {h.get('text','')}"
-        for h in history if isinstance(h, dict)
-    )
-
     prompt = f"""
 You are a real Indian bank customer.
-You are cautious and suspicious.
+You are scared but cautious.
 You NEVER share OTPs or account numbers.
-You NEVER repeat your previous reply.
-
-Current phase: {phase}
-Scammer intent: {intent}
-
-Previous reply (DO NOT repeat):
-{last_agent_reply or "None"}
+You must NEVER repeat the same sentence.
+You respond naturally to the scammer.
 
 Conversation so far:
 {history_text}
@@ -58,9 +63,13 @@ Reply as USER in ONE natural sentence:
 
     reply = hf_generate(prompt)
 
-    # FINAL LOOP GUARD
+    # 🛡️ FINAL LOOP GUARD
     if last_agent_reply and reply.strip().lower() == last_agent_reply.strip().lower():
-        reply = "This feels unsafe. I will contact my bank directly."
+        reply = random.choice(EXIT_REPLIES)
+        next_phase = "EXITED"
+
+    # 🧠 AUTO EXIT AFTER HEAVY PRESSURE
+    if stage >= 5 and intent in ["OTP", "ACCOUNT", "THREAT"]:
         next_phase = "EXITED"
 
     return {
