@@ -1,78 +1,60 @@
 from llm import hf_generate
-from intent import detect_intent
 import random
 
-EXIT_REPLIES = [
-    "I’m not comfortable continuing this conversation.",
-    "I’ve decided to contact my bank directly.",
-    "I won’t share sensitive information here.",
-    "I’m ending this conversation now.",
-    "Please stop contacting me. I’ll handle this with my bank."
+PROBE_RESPONSES = [
+    "Why would my account be blocked suddenly?",
+    "What transaction are you talking about?",
+    "I didn’t receive any notification from my bank.",
+    "Can you explain what exactly went wrong?"
 ]
 
-def agent_reply(
-    stage: int,
-    last_message: str,
-    history: list,
-    intelligence: dict,
-    last_agent_reply: str | None,
-    phase: str
-) -> dict:
+DELAY_RESPONSES = [
+    "I’m checking my banking app now, give me a moment.",
+    "I’m trying to understand this, please wait.",
+    "I’m not very technical, can you explain slowly?"
+]
 
-    intent = detect_intent(last_message)
+REFUSAL_RESPONSES = [
+    "I’m not comfortable sharing OTPs.",
+    "I won’t share sensitive details here.",
+    "This doesn’t seem right to me."
+]
 
-    history_text = "\n".join(
-        f"{h.get('sender','')}: {h.get('text','')}"
-        for h in history if isinstance(h, dict)
-    )
+EXIT_RESPONSES = [
+    "I’ll contact my bank directly.",
+    "Please stop contacting me.",
+    "I’m ending this conversation now."
+]
 
-    # 🟥 SAFE DISENGAGEMENT PHASE (NO HARD LOOP)
-    if phase == "EXITED":
-        reply = random.choice(
-            [r for r in EXIT_REPLIES if r != last_agent_reply]
-            or EXIT_REPLIES
-        )
-        return {
-            "reply": reply,
-            "phase": "EXITED"
-        }
+def agent_reply(stage, last_message, history, intelligence, last_agent_reply):
+    msg = last_message.lower()
 
-    # 🔄 PHASE TRANSITIONS
-    if intent == "OTP":
-        next_phase = "RESISTING"
-    elif phase == "CONFUSED":
-        next_phase = "VERIFYING"
+    # 🔍 PROBE (early)
+    if stage <= 2:
+        reply = random.choice(PROBE_RESPONSES)
+
+    # ⏳ DELAY (extraction window)
+    elif stage <= 4:
+        reply = random.choice(DELAY_RESPONSES)
+
+    # 🚫 REFUSE (OTP pressure)
+    elif "otp" in msg or "pin" in msg:
+        reply = random.choice(REFUSAL_RESPONSES)
+
+    # 🔚 EXIT
     else:
-        next_phase = phase
+        reply = random.choice(EXIT_RESPONSES)
 
+    # 🧠 OPTIONAL LLM POLISH
     prompt = f"""
-You are a real Indian bank customer.
-You are scared but cautious.
-You NEVER share OTPs or account numbers.
-You must NEVER repeat the same sentence.
-You respond naturally to the scammer.
-
-Conversation so far:
-{history_text}
-
-Scammer just said:
-{last_message}
-
-Reply as USER in ONE natural sentence:
+Rewrite the following message naturally as a scared bank customer.
+Do not add new information.
+Message:
+"{reply}"
 """
+    final_reply = hf_generate(prompt)
 
-    reply = hf_generate(prompt)
+    if last_agent_reply and final_reply.lower() == last_agent_reply.lower():
+        final_reply = random.choice(EXIT_RESPONSES)
 
-    # 🛡️ FINAL LOOP GUARD
-    if last_agent_reply and reply.strip().lower() == last_agent_reply.strip().lower():
-        reply = random.choice(EXIT_REPLIES)
-        next_phase = "EXITED"
-
-    # 🧠 AUTO EXIT AFTER HEAVY PRESSURE
-    if stage >= 5 and intent in ["OTP", "ACCOUNT", "THREAT"]:
-        next_phase = "EXITED"
-
-    return {
-        "reply": reply,
-        "phase": next_phase
-    }
+    return {"reply": final_reply}
