@@ -26,7 +26,7 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # ✅ GUVI preflight
-    if request.method in ["HEAD", "OPTIONS"]:
+    if request.method in ["GET", "HEAD", "OPTIONS"]:
         return {"status": "success"}
 
     # ✅ SAFE JSON PARSE
