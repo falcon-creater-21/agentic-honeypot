@@ -96,7 +96,7 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
             history=history,
             intelligence=intelligence,
             last_agent_reply=last_reply,
-            phase=phase
+            
         )
         reply_text = agent["reply"]
         new_phase = agent["phase"]
