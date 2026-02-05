@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, Request
 import sqlite3, time, os
 
 from storage import init_db
@@ -12,30 +12,22 @@ DB_PATH = "honeypot.db"
 app = FastAPI()
 init_db()
 
-# ---------------- HEALTH ---------------- #
 @app.get("/")
 def health():
     return {"status": "success", "reply": "Honeypot active"}
 
-# ---------------- HONEYPOT ---------------- #
 @app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
-    # 🔐 AUTH (ALWAYS RETURN JSON)
     if x_api_key != API_KEY:
         return {"status": "error", "reply": "Unauthorized"}
 
-    # ✅ PRE-FLIGHT / EMPTY CALLS (GUVI TESTER)
     if request.method in ["HEAD", "OPTIONS"]:
         return {"status": "success", "reply": "Honeypot active"}
 
-    # ✅ SAFE JSON PARSE (NO EMPTY RESPONSE EVER)
     try:
         payload = await request.json()
     except Exception:
-        return {"status": "success", "reply": "Honeypot active"}
-
-    if not isinstance(payload, dict):
         return {"status": "success", "reply": "Honeypot active"}
 
     session_id = payload.get("sessionId")
@@ -49,24 +41,24 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     if not text:
         return {"status": "success", "reply": "Honeypot active"}
 
-    # ---------------- DB ---------------- #
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("SELECT stage FROM sessions WHERE session_id=?", (session_id,))
+    cur.execute("SELECT stage, agent_notes FROM sessions WHERE session_id=?", (session_id,))
     row = cur.fetchone()
 
     if not row:
         stage = 1
+        last_agent_reply = None
         cur.execute(
-            "INSERT INTO sessions (session_id, scam_detected, start_time, stage, agent_notes) VALUES (?,?,?,?,?)",
+            "INSERT INTO sessions VALUES (?,?,?,?,?)",
             (session_id, 0, time.time(), stage, "")
         )
     else:
-        stage = row[0]
+        stage, last_agent_reply = row
 
     cur.execute(
-        "INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?,?,?,?)",
+        "INSERT INTO messages VALUES (NULL,?,?,?,?)",
         (
             session_id,
             message.get("sender", ""),
@@ -75,9 +67,7 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         )
     )
 
-    # ---------------- INTELLIGENCE ---------------- #
-    history_texts = [h.get("text", "") for h in history if isinstance(h, dict)]
-    full_text = " ".join(history_texts + [text])
+    full_text = " ".join(h.get("text", "") for h in history if isinstance(h, dict)) + " " + text
     intelligence = extract_all(full_text)
 
     scam_detected = len(intelligence["suspiciousKeywords"]) >= 2
@@ -85,37 +75,29 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     reply_text = "Can you explain that?"
 
     if scam_detected:
-        agent = agent_reply(stage, text, history, intelligence)
+        agent = agent_reply(stage, text, history, intelligence, last_agent_reply)
         reply_text = agent["reply"]
 
         cur.execute(
-            "UPDATE sessions SET stage = stage + 1, scam_detected = 1 WHERE session_id=?",
-            (session_id,)
+            "UPDATE sessions SET stage=stage+1, scam_detected=1, agent_notes=? WHERE session_id=?",
+            (reply_text, session_id)
         )
 
     conn.commit()
     conn.close()
 
-    # ---------------- FINAL CALLBACK ---------------- #
     if scam_detected and stage >= 3:
         try:
             send_final_result({
                 "sessionId": session_id,
                 "scamDetected": True,
                 "totalMessagesExchanged": stage,
-                "extractedIntelligence": {
-                    "bankAccounts": intelligence["bankAccounts"],
-                    "upiIds": intelligence["upiIds"],
-                    "phishingLinks": intelligence["phishingLinks"],
-                    "phoneNumbers": intelligence["phoneNumbers"],
-                    "suspiciousKeywords": intelligence["suspiciousKeywords"]
-                },
-                "agentNotes": "Scammer used urgency and payment redirection tactics"
+                "extractedIntelligence": intelligence,
+                "agentNotes": "HF-driven adaptive engagement"
             })
         except Exception:
             pass
 
-    # ✅ EXACT FORMAT GUVI EXPECTS
     return {
         "status": "success",
         "reply": reply_text
