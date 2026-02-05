@@ -20,34 +20,40 @@ def health():
 @app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
-    # AUTH
+    # 🔐 AUTH
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # HEAD / OPTIONS → PASS TESTER
+    # ✅ GUVI tester preflight
     if request.method in ["HEAD", "OPTIONS"]:
         return
 
-    # SAFE BODY PARSE
+    # ✅ SAFE JSON PARSE
     try:
-        body = await request.body()
-        payload = json.loads(body) if body else {}
+        payload = await request.json()
     except Exception:
-        payload = {}
-
-    # 🔑 GUVI TESTER EMPTY BODY EXPECTATION
-    if not payload:
         return {
             "status": "success",
             "reply": "Honeypot active"
         }
 
-    # ---------------- NORMAL FLOW ---------------- #
+    # ✅ REQUIRED FIELD CHECK
+    if not isinstance(payload, dict):
+        return {
+            "status": "success",
+            "reply": "Honeypot active"
+        }
+
     session_id = payload.get("sessionId")
-    message = payload.get("message", {})
+    message = payload.get("message")
     history = payload.get("conversationHistory", [])
 
-    if not session_id or not message:
+    # GUVI may send empty history
+    if not isinstance(history, list):
+        history = []
+
+    # GUVI requires message
+    if not session_id or not isinstance(message, dict):
         return {
             "status": "success",
             "reply": "Honeypot active"
@@ -57,27 +63,51 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     text = message.get("text", "")
     timestamp = message.get("timestamp", int(time.time() * 1000))
 
+    if not text:
+        return {
+            "status": "success",
+            "reply": "Honeypot active"
+        }
+
+    # ---------------- DB ---------------- #
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("SELECT stage FROM sessions WHERE session_id=?", (session_id,))
+    cur.execute(
+        "SELECT stage FROM sessions WHERE session_id=?",
+        (session_id,)
+    )
     row = cur.fetchone()
 
     if not row:
         stage = 1
         cur.execute(
-            "INSERT INTO sessions (session_id, scam_detected, start_time, stage, agent_notes) VALUES (?,?,?,?,?)",
+            """
+            INSERT INTO sessions
+            (session_id, scam_detected, start_time, stage, agent_notes)
+            VALUES (?,?,?,?,?)
+            """,
             (session_id, 0, time.time(), stage, "")
         )
     else:
         stage = row[0]
 
     cur.execute(
-        "INSERT INTO messages (session_id, sender, text, timestamp) VALUES (?,?,?,?)",
+        """
+        INSERT INTO messages (session_id, sender, text, timestamp)
+        VALUES (?,?,?,?)
+        """,
         (session_id, sender, text, timestamp)
     )
 
-    full_text = " ".join([m.get("text", "") for m in history] + [text])
+    # ---------------- INTELLIGENCE ---------------- #
+    history_texts = [
+        h.get("text", "")
+        for h in history
+        if isinstance(h, dict)
+    ]
+
+    full_text = " ".join(history_texts + [text])
     intelligence = extract_all(full_text)
 
     scam_detected = len(intelligence.get("suspiciousKeywords", [])) >= 2
@@ -96,7 +126,7 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     conn.commit()
     conn.close()
 
-    # 🔥 ALWAYS RETURN THIS FORMAT
+    # ✅ EXACT RESPONSE FORMAT GUVI EXPECTS
     return {
         "status": "success",
         "reply": reply_text
