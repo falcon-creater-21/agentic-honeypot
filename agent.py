@@ -1,86 +1,96 @@
 def agent_reply(stage: int, last_message: str, history: list, intelligence: dict) -> dict:
     """
     Human-like naive victim agent.
-    Optimized for GUVI evaluation scoring.
+    Loop-safe, stage-aware, GUVI-optimized.
     """
 
     msg = last_message.lower()
 
-    # ---------- EMOTIONAL TRUST FIRST ----------
+    # ---------------- FEAR & TRUST BUILDING ---------------- #
 
-    if "blocked" in msg or "suspended" in msg:
+    if ("blocked" in msg or "suspended" in msg) and stage <= 2:
         return {
             "reply": "Why is my account getting blocked suddenly? I didn’t do anything wrong.",
             "note": "Fear escalation"
         }
 
-    if "urgent" in msg or "immediately" in msg:
+    if ("urgent" in msg or "immediately" in msg) and stage <= 2:
         return {
-            "reply": "Please don’t block my account. What will happen if I don’t do this now?",
+            "reply": "This is scaring me. What will happen if I don’t do this right now?",
             "note": "Urgency reinforcement"
         }
 
-    # ---------- INTELLIGENCE EXTRACTION ----------
+    # ---------------- BANK ACCOUNT EXTRACTION ---------------- #
 
-    if "account" in msg and not intelligence["bankAccounts"]:
+    if "account" in msg and stage == 2:
         return {
-            "reply": "Which account number do you need exactly? Please guide me carefully.",
-            "note": "Bank account extraction"
+            "reply": "I have more than one account. Which one are you talking about?",
+            "note": "Account clarification"
         }
 
-    if "ifsc" in msg and not intelligence["bankAccounts"]:
+    if "account" in msg and stage == 3:
         return {
-            "reply": "I’m not sure where to find the IFSC. Can you explain?",
-            "note": "IFSC clarification"
+            "reply": "I’m opening my bank app now. Can you stay with me?",
+            "note": "Delayed compliance"
         }
 
-    if "upi" in msg and not intelligence["upiIds"]:
+    if "account" in msg and stage >= 4:
         return {
-            "reply": "I tried sharing my UPI earlier but it didn’t work. Can you resend yours?",
-            "note": "UPI extraction"
+            "reply": "I see a long number here, but I’m not sure if it’s safe to share.",
+            "note": "Hesitation escalation"
         }
 
-    if any(k in msg for k in ["link", "verify", "click"]) and not intelligence["phishingLinks"]:
-        return {
-            "reply": "The link isn’t opening on my phone. Can you send it again?",
-            "note": "Phishing link extraction"
-        }
+    # ---------------- OTP BAITING ---------------- #
 
-    if "otp" in msg:
+    if "otp" in msg and stage <= 3:
         return {
-            "reply": "I just received an OTP. Should I share it with you?",
+            "reply": "I just received an OTP message. Is it really required?",
             "note": "OTP baiting"
         }
 
-    # ---------- STAGE-BASED FLOW ----------
+    if "otp" in msg and stage >= 4:
+        return {
+            "reply": "The OTP says not to share it with anyone. Is this really from the bank?",
+            "note": "Trust challenge"
+        }
+
+    # ---------------- LINK / PHISHING ---------------- #
+
+    if any(k in msg for k in ["link", "verify", "click"]) and stage <= 3:
+        return {
+            "reply": "I clicked the link but it’s asking for permissions. Is that normal?",
+            "note": "Phishing hesitation"
+        }
+
+    # ---------------- STAGE-BASED FALLBACK ---------------- #
 
     if stage == 1:
         return {
-            "reply": "I’m confused. Why is my account at risk?",
+            "reply": "I don’t understand what went wrong. Can you explain?",
             "note": "Initial engagement"
         }
 
     if stage == 2:
         return {
-            "reply": "Okay, I want to fix this. Please tell me what to do next.",
+            "reply": "Okay, I want to fix this. Please guide me step by step.",
             "note": "Compliance initiation"
         }
 
     if stage == 3:
         return {
-            "reply": "I’m trying to follow your steps, but I’m not very technical.",
-            "note": "Delayed compliance"
+            "reply": "I’m trying to follow what you’re saying, but it’s confusing.",
+            "note": "Mid engagement"
         }
 
     if stage >= 4:
         return {
-            "reply": "I really don’t want to lose my money. Please help me finish this.",
+            "reply": "Please don’t lock my account. I’ll do whatever is needed.",
             "note": "Emotional compliance"
         }
 
-    # ---------- FALLBACK ----------
+    # ---------------- FINAL SAFETY NET ---------------- #
 
     return {
-        "reply": "Please explain again. I don’t want to make a mistake.",
-        "note": "Extended engagement"
+        "reply": "Please explain once more. I don’t want to make a mistake.",
+        "note": "Final fallback"
     }
