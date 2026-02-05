@@ -1,47 +1,54 @@
 from llm import hf_generate
+from intent import detect_intent
 
-def agent_reply(stage: int, last_message: str, history: list, intelligence: dict, last_agent_reply: str | None) -> dict:
-    """
-    HF-powered, loop-safe, state-aware honeypot agent.
-    """
+def agent_reply(stage, last_message, history, intelligence, last_reply, phase):
+    intent = detect_intent(last_message)
 
-    history_text = "\n".join(
-        f"{h.get('sender', 'unknown')}: {h.get('text', '')}"
-        for h in history if isinstance(h, dict)
-    )
+    # 🚫 HARD TERMINAL STATE
+    if phase == "EXITED":
+        return {
+            "reply": "I will handle this directly with my bank.",
+            "phase": "EXITED"
+        }
+
+    # 🔄 PHASE TRANSITIONS
+    if intent == "OTP" and phase != "EXITED":
+        next_phase = "RESISTING"
+    elif phase == "CONFUSED":
+        next_phase = "VERIFYING"
+    else:
+        next_phase = phase
 
     prompt = f"""
-You are a normal Indian bank customer.
-You are scared, cautious, and slightly suspicious.
-You NEVER reveal OTPs or full account numbers.
-You must NOT repeat your previous reply.
-Each reply must be different from before.
+You are a real Indian bank customer.
 
-Previous reply (DO NOT repeat):
-"{last_agent_reply or 'None'}"
-
-Conversation so far:
-{history_text}
-
-Scammer just said:
-"{last_message}"
+Current phase: {phase}
+Scammer intent: {intent}
 
 Rules:
-- Ask a different clarifying question each time
-- Gradually become more suspicious
-- If OTP pressure continues, move toward refusal
-- Reply in ONE natural sentence only
+- NEVER repeat previous replies
+- NEVER reveal OTP, UPI, or full account numbers
+- Respond ONLY to the scammer's last message
+- Move naturally between phases
+- ONE sentence only
 
-User reply:
+Previous reply (avoid repeating):
+{last_reply or "None"}
+
+Conversation:
+{last_message}
+
+Respond as the USER:
 """
 
     reply = hf_generate(prompt)
 
-    # Final guard against repetition
-    if last_agent_reply and reply.strip().lower() == last_agent_reply.strip().lower():
-        reply = "This doesn’t feel right. I will contact my bank directly."
+    # 🛑 FINAL SAFETY GUARD
+    if last_reply and reply.strip().lower() == last_reply.strip().lower():
+        reply = "This feels unsafe. I will contact my bank directly."
+        next_phase = "EXITED"
 
     return {
         "reply": reply,
-        "note": "HF-generated"
+        "phase": next_phase
     }

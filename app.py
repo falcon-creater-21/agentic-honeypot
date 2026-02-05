@@ -12,22 +12,30 @@ DB_PATH = "honeypot.db"
 app = FastAPI()
 init_db()
 
+# ---------------- HEALTH ---------------- #
 @app.get("/")
 def health():
     return {"status": "success", "reply": "Honeypot active"}
 
+# ---------------- HONEYPOT ---------------- #
 @app.api_route("/honeypot", methods=["POST", "HEAD", "OPTIONS"])
 async def honeypot(request: Request, x_api_key: str = Header(None)):
 
+    # AUTH (always JSON)
     if x_api_key != API_KEY:
         return {"status": "error", "reply": "Unauthorized"}
 
+    # Preflight / empty tester calls
     if request.method in ["HEAD", "OPTIONS"]:
         return {"status": "success", "reply": "Honeypot active"}
 
+    # Safe JSON parse
     try:
         payload = await request.json()
     except Exception:
+        return {"status": "success", "reply": "Honeypot active"}
+
+    if not isinstance(payload, dict):
         return {"status": "success", "reply": "Honeypot active"}
 
     session_id = payload.get("sessionId")
@@ -41,21 +49,26 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     if not text:
         return {"status": "success", "reply": "Honeypot active"}
 
+    # ---------------- DB ---------------- #
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("SELECT stage, agent_notes FROM sessions WHERE session_id=?", (session_id,))
+    cur.execute(
+        "SELECT stage, agent_notes, phase FROM sessions WHERE session_id=?",
+        (session_id,)
+    )
     row = cur.fetchone()
 
     if not row:
         stage = 1
-        last_agent_reply = None
+        last_reply = None
+        phase = "CONFUSED"
         cur.execute(
-            "INSERT INTO sessions VALUES (?,?,?,?,?)",
-            (session_id, 0, time.time(), stage, "")
+            "INSERT INTO sessions VALUES (?,?,?,?,?,?)",
+            (session_id, 0, time.time(), stage, "", phase)
         )
     else:
-        stage, last_agent_reply = row
+        stage, last_reply, phase = row
 
     cur.execute(
         "INSERT INTO messages VALUES (NULL,?,?,?,?)",
@@ -67,7 +80,9 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         )
     )
 
-    full_text = " ".join(h.get("text", "") for h in history if isinstance(h, dict)) + " " + text
+    # ---------------- INTELLIGENCE ---------------- #
+    history_texts = [h.get("text", "") for h in history if isinstance(h, dict)]
+    full_text = " ".join(history_texts + [text])
     intelligence = extract_all(full_text)
 
     scam_detected = len(intelligence["suspiciousKeywords"]) >= 2
@@ -75,17 +90,26 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
     reply_text = "Can you explain that?"
 
     if scam_detected:
-        agent = agent_reply(stage, text, history, intelligence, last_agent_reply)
+        agent = agent_reply(
+            stage=stage,
+            last_message=text,
+            history=history,
+            intelligence=intelligence,
+            last_agent_reply=last_reply,
+            phase=phase
+        )
         reply_text = agent["reply"]
+        new_phase = agent["phase"]
 
         cur.execute(
-            "UPDATE sessions SET stage=stage+1, scam_detected=1, agent_notes=? WHERE session_id=?",
-            (reply_text, session_id)
+            "UPDATE sessions SET stage=stage+1, scam_detected=1, agent_notes=?, phase=? WHERE session_id=?",
+            (reply_text, new_phase, session_id)
         )
 
     conn.commit()
     conn.close()
 
+    # ---------------- FINAL CALLBACK ---------------- #
     if scam_detected and stage >= 3:
         try:
             send_final_result({
@@ -98,6 +122,7 @@ async def honeypot(request: Request, x_api_key: str = Header(None)):
         except Exception:
             pass
 
+    # EXACT FORMAT GUVI EXPECTS
     return {
         "status": "success",
         "reply": reply_text
