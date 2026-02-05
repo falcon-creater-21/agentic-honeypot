@@ -1,62 +1,86 @@
 def agent_reply(stage: int, last_message: str, history: list, intelligence: dict) -> dict:
     """
-    Rule-guided autonomous honeypot agent.
+    Human-like naive victim agent.
+    Escalates compliance gradually and extracts intelligence.
     """
 
     msg = last_message.lower()
 
-    # ---------- EXTRACTION PRIORITY ----------
-    if not intelligence.get("upiIds") and "upi" in msg:
+    # ---------- HIGH PRIORITY EXTRACTION ----------
+
+    if "account" in msg and not intelligence["bankAccounts"]:
         return {
-            "reply": "That UPI didn’t work. Can you send it again carefully?",
+            "reply": "I’m scared. Which account number do you need? Please tell me exactly.",
+            "note": "Prompting bank account"
+        }
+
+    if "ifsc" in msg and not intelligence["bankAccounts"]:
+        return {
+            "reply": "I’m not sure where to find IFSC. Can you explain?",
+            "note": "IFSC clarification"
+        }
+
+    if "upi" in msg and not intelligence["upiIds"]:
+        return {
+            "reply": "I tried sending my UPI earlier but it failed. Can you check again?",
             "note": "UPI extraction"
         }
 
-    if not intelligence.get("bankAccounts") and any(k in msg for k in ["account", "bank"]):
+    if any(k in msg for k in ["link", "verify", "click"]) and not intelligence["phishingLinks"]:
         return {
-            "reply": "Please share the full account number and IFSC. I don’t want any mistake.",
-            "note": "Bank extraction"
+            "reply": "I clicked the link but nothing happened. Can you resend it?",
+            "note": "Phishing link extraction"
         }
 
-    if not intelligence.get("phishingLinks") and any(k in msg for k in ["link", "verify", "click"]):
+    if "otp" in msg:
         return {
-            "reply": "The link isn’t opening for me. Can you resend it?",
-            "note": "Link extraction"
+            "reply": "I got an OTP message. Should I share it with you?",
+            "note": "OTP baiting"
         }
 
-    # ---------- SOCIAL ENGINEERING ----------
+    # ---------- PSYCHOLOGICAL ENGAGEMENT ----------
+
     if "urgent" in msg or "immediately" in msg:
         return {
-            "reply": "Why is it so urgent? What exactly will happen?",
-            "note": "Urgency probing"
+            "reply": "Please don’t block my account. What will happen if I don’t do this now?",
+            "note": "Urgency reinforcement"
         }
 
     if "blocked" in msg or "suspended" in msg:
         return {
-            "reply": "I don’t understand why my account would be blocked. What happened?",
-            "note": "Fear probing"
+            "reply": "Why is my account getting blocked suddenly? I didn’t do anything wrong.",
+            "note": "Fear escalation"
         }
 
-    if "send" in msg or "pay" in msg:
+    # ---------- STAGE-BASED FLOW ----------
+
+    if stage == 1:
         return {
-            "reply": "I’ve never done this before. How exactly should I send it?",
-            "note": "Payment probing"
+            "reply": "I’m confused. Why is my account at risk?",
+            "note": "Initial engagement"
         }
 
-    # ---------- FALLBACK ----------
-    if stage <= 2:
+    if stage == 2:
         return {
-            "reply": "Can you explain that once more? I’m confused.",
-            "note": "Early engagement"
+            "reply": "Okay, I want to fix this. Please guide me step by step.",
+            "note": "Compliance initiation"
         }
 
-    if stage <= 4:
+    if stage == 3:
         return {
-            "reply": "I want to resolve this today. What should I do next?",
-            "note": "Mid engagement"
+            "reply": "I’m trying to follow your instructions but I’m not very technical.",
+            "note": "Delayed compliance"
         }
+
+    if stage == 4:
+        return {
+            "reply": "I really don’t want to lose my money. Please help me finish this.",
+            "note": "Emotional compliance"
+        }
+
+    # ---------- FINAL FALLBACK ----------
 
     return {
-        "reply": "Please give me the exact steps again. I don’t want to make any mistake.",
+        "reply": "Please explain once more. I don’t want to make any mistake.",
         "note": "Extended engagement"
     }
